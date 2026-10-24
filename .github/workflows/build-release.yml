@@ -305,7 +305,7 @@ jobs:
           Commit: $COMMIT_SHA
 
           Signed Release APK with SHA-256 checksum." \
-            --prerelease
+            --latest
 
       # --------------------------------------------------
       # 12. Build summary
