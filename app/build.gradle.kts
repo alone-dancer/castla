@@ -1,3 +1,4 @@
+
 import java.util.Properties
 
 plugins {
@@ -5,23 +6,80 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// ---------------------------------------------------------
+// Signing configuration
+// Supports both GitHub Actions environment variables
+// and local keystore.properties
+// ---------------------------------------------------------
+
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties()
+
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(keystorePropertiesFile.inputStream())
+    keystorePropertiesFile.inputStream().use {
+        keystoreProperties.load(it)
+    }
 }
+
+val ciKeystore = System.getenv("CASTLA_KEYSTORE_FILE")
+val ciStorePassword = System.getenv("CASTLA_STORE_PASSWORD")
+val ciKeyAlias = System.getenv("CASTLA_KEY_ALIAS")
+val ciKeyPassword = System.getenv("CASTLA_KEY_PASSWORD")
+
+val hasCiSigning = listOf(
+    ciKeystore,
+    ciStorePassword,
+    ciKeyAlias,
+    ciKeyPassword
+).all { !it.isNullOrBlank() }
+
+val hasLocalSigning = listOf(
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword"
+).all {
+    !keystoreProperties.getProperty(it).isNullOrBlank()
+}
+
+val hasReleaseSigning = hasCiSigning || hasLocalSigning
+
+// ---------------------------------------------------------
+// Version configuration
+// GitHub Actions can override these values
+// ---------------------------------------------------------
+
+val castlaVersionCode =
+    System.getenv("CASTLA_VERSION_CODE")
+        ?.toIntOrNull() ?: 11
+
+val castlaVersionName =
+    System.getenv("CASTLA_VERSION_NAME")
+        ?.takeIf { it.isNotBlank() } ?: "1.1.0"
 
 android {
     namespace = "com.castla.mirror"
     compileSdk = 35
 
-    if (keystorePropertiesFile.exists()) {
-        signingConfigs {
+    signingConfigs {
+        if (hasReleaseSigning) {
             create("release") {
-                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
+                if (hasCiSigning) {
+                    storeFile = file(ciKeystore!!)
+                    storePassword = ciStorePassword!!
+                    keyAlias = ciKeyAlias!!
+                    keyPassword = ciKeyPassword!!
+                } else {
+                    storeFile = rootProject.file(
+                        keystoreProperties.getProperty("storeFile")
+                    )
+                    storePassword =
+                        keystoreProperties.getProperty("storePassword")
+                    keyAlias =
+                        keystoreProperties.getProperty("keyAlias")
+                    keyPassword =
+                        keystoreProperties.getProperty("keyPassword")
+                }
             }
         }
     }
@@ -30,18 +88,29 @@ android {
         applicationId = "com.castla.mirror"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        versionCode = castlaVersionCode
+        versionName = castlaVersionName
+
+        testInstrumentationRunner =
+            "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (keystorePropertiesFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
+
+            proguardFiles(
+                getDefaultProguardFile(
+                    "proguard-android-optimize.txt"
+                ),
+                "proguard-rules.pro"
+            )
+
+            if (hasReleaseSigning) {
+                signingConfig =
+                    signingConfigs.getByName("release")
             }
         }
     }
@@ -112,7 +181,7 @@ dependencies {
     testImplementation("androidx.test:core:1.5.0")
     testImplementation("androidx.test.ext:junit:1.1.5")
 
-    // Android Instrumented Tests (스크린샷 자동화용)
+    // Android Instrumented Tests
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
     androidTestImplementation("androidx.test:rules:1.5.0")
